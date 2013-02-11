@@ -1,0 +1,7 @@
+Just run ./middle.sh, and play with it
+
+Exiting with ^C will cause background processes to hang
+	To kill them, use
+		ps -e
+	and
+		kill
