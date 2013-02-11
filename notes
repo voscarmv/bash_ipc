@@ -1,0 +1,52 @@
+Sun Feb 10 11:40:38 CST 2013
+Middleman is a background process which is constantly extracting and counting bytes from a
+FIFO (a named pipe), one byte at a time. It requires an "open input" function (to read
+bytes from), a "read" function, to extract bytes, and another "open input" to deposit the
+extracted and counted bytes in.
+Sun Feb 10 19:58:46 CST 2013
+There is a particular problem with middleman: it must report whethere there are bytes in
+a fifo or not. Since it's a backgrounded loop, in order to do this, it must use a named
+pipe. This pipe must always hold a value: 0 for no bytes in the fifo, and 1 for more than 0
+bytes in the fifo. This pipe must never be left empty, because if it ever is empty, reading
+from it will pause script execution indefinitely. This establishes the need of a protocol
+for writing and reading to this pipe:
+	1. The pipe must be opened through a loop of the form:
+		while : ; do
+			cat ${PAUSER_PIPE} > /dev/null
+		done > ${BOOLE_PIPE}	#	<< This is the byte-indicator pipe
+	2. The first operation to ever be performed on the pipe must be a write.
+	3. From there on, every subsequent write function must begin with a previous
+		flush (read) function:
+						 # For reading from the pipe:
+		BOOLE=`cat ${BOOLE_PIPE}`	 #	<< It is necessary to flush the 
+						 #	   previous contents to substitute
+						 #	   it.
+		printf ${BOOLE} > ${BOOLE_PIPE}	 #	<< In read, prev val is preserved
+						 # For writing to the pipe:
+		cat ${BOOLE_PIPE} > /dev/null	 #
+		printf ${NEWVAL} > ${BOOLE_PIPE} #	<< In write, it is substituted.
+The worst case scenario here, is to have the following shituation:
+	Init:	printf ${INIT} > ${BOOLE_PIPE}
+	Proc 1:	cat ${BOOLE_PIPE}
+	Proc 2:	cat ${BOOLE_PIPE}
+	Proc 1:	printf ${VAL1} > ${BOOLE_PIPE}
+	Proc 2:	printf ${VAL2} > ${BOOLE_PIPE}
+Proc 2 flushes before Proc 1 writes to boole pipe. In this case, Proc 2 hangs until Proc 1
+writes to boole pipe, then Proc 2 flushes whatever Proc 1 wrote to boole pipe, and then
+writes it's own contents into boole pipe.
+Whether Proc 1 is performing a read or write function, and whether Proc 2 is performing a
+read or write operation, is unimportant: either way, the correct order is preserved.
+This is due to the fact that, the following situation, is equivalent:
+	Init:	printf ${INIT} > ${BOOLE_PIPE}
+	Proc 1:	cat ${BOOLE_PIPE}
+	Proc 1:	printf ${VAL1} > ${BOOLE_PIPE}
+	Proc 2:	cat ${BOOLE_PIPE}
+	Proc 2:	printf ${VAL2} > ${BOOLE_PIPE}
+In the previous case, Proc 2 first flushes whatever Proc 1 writes to the boole pipe, and
+then provides it's own contents. Here, the same thing happens.
+It should now be mentioned that middleman may pass values greater than '0' or '1' through
+the boole pipe. It would be more convenient to pass a bytecounter value.
+Mon Feb 11 16:27:01 CST 2013
+There are several misconceptions in these notes:
+	1. It is not necessary to keep bytecounter open
+	2. The correct solution is in bash_IPC_middleman
